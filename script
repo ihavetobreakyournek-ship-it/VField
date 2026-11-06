@@ -1,9 +1,9 @@
 --[[
-	V FIELD LIBRARY  v5.0  "Prism"
+	V FIELD LIBRARY  v6.0  "Zenith"
 	A standalone, all-square Roblox UI library. PC + mobile.
 
 	QUICK START
-		local VField = loadstring(game:HttpGet("https://raw.githubusercontent.com/ihavetobreakyournek-ship-it/VField/refs/heads/main/script"))()
+		local VField = loadstring(game:HttpGet("YOUR_RAW_URL"))()
 		local Window = VField:CreateWindow({
 			Name = "My Hub", Subtitle = "v1.0", ToggleKey = Enum.KeyCode.RightControl,
 			Theme = "Crimson", ConfigFolder = "MyHub", AutoSave = true,
@@ -25,7 +25,18 @@
 	         :CreateColorPicker (HSV/hex/rainbow) :CreateProgressBar     :SetCollapsed(bool)
 	ELEMENT  .Set .Get .SetTitle .SetDescription .SetVisible .SetDisabled .Destroy
 	COMMON   Name, Description, Flag, Callback, Tooltip, Disabled, IgnoreConfig
-	LIBRARY  VField:SetTheme(name) :RegisterTheme(name, tbl) :SetAccent(color3) :SetRainbow(bool) :GetFlag(f) :Unload()
+	LIBRARY  VField:SetTheme(name) :RegisterTheme(name, tbl) :SetAccent(color3) :SetColor(key, color3) :SetRainbow(bool)
+	         :GetFlag(f) :Notify{} :GetHWID() :Unload()
+
+	NEW IN v6   Tab elements work without a section (Tab:CreateToggle(...) goes into the latest section), element methods work
+	            with . or : (el.Set(v) / el:Set(v)), CreateSegmented, CreateRangeSlider, CreateConsole (:Log/:Clear), CreateImage,
+	            CreateLink, Window:Prompt{} (text dialog), Window:CreateTabGroup(title), :SelectTab(name), :SetTitle/:SetSubtitle,
+	            :OnToggle(fn), :ResetPosition(), PerGame = true (config folder per PlaceId), KeySystem.OnSuccess, theme editor.
+
+	RAYFIELD COMPATIBILITY  Window config accepts KeySystem=true + KeySettings, ConfigurationSaving, ToggleUIKeybind, Theme names
+	            (Default, AmberGlow, Amethyst, Bloom, DarkBlue, Green, Light, Ocean, Serenity). Elements accept a plain string or
+	            Rayfield-style tables (CurrentOption tables, MultipleOptions, Color, HoldToInteract, RemoveTextAfterFocusLost).
+	            Also VField:Notify{}, Window:LoadConfiguration(), Window:ModifyTheme(name), VField:Destroy().
 
 	KEY SYSTEM (KeySystem = {...})
 		Enabled, Title, Subtitle, Note, Key (string), Keys ({}), KeyUrl (raw text, one key per line),
@@ -50,7 +61,7 @@ local rgb = Color3.fromRGB
 local env = (getgenv and getgenv()) or _G
 if env.VFieldLib and env.VFieldLib.Unload then pcall(env.VFieldLib.Unload, env.VFieldLib) end
 
-local VField = {Version = "5.0.0", Flags = {}}
+local VField = {Version = "6.0.0", Flags = {}}
 env.VFieldLib = VField
 
 ---------------------------------------------------------------------
@@ -106,6 +117,7 @@ defineTheme("Snow", {Accent = rgb(30, 100, 255), Bright = rgb(70, 130, 255), Sof
 	Background = rgb(242, 242, 245), Panel = rgb(228, 228, 233), Raised = rgb(250, 250, 252), Hover = rgb(212, 212, 220),
 	Text = rgb(20, 20, 26), Muted = rgb(98, 98, 110), Line = rgb(188, 188, 198)})
 
+local ALIAS = {Default = "Mono", Light = "Snow", Green = "Emerald", Amethyst = "Violet", DarkBlue = "Midnight", AmberGlow = "Sunset", Bloom = "Rose", Serenity = "Ocean"}
 local COLORS = {}
 for k, v in pairs(THEMES.Mono) do COLORS[k] = v end
 local THEME_KEYS = {}
@@ -239,6 +251,7 @@ end
 -- THEME API
 ---------------------------------------------------------------------
 function VField:SetTheme(name)
+	name = ALIAS[name] or name
 	local t = THEMES[name]
 	if not t then return end
 	currentTheme, rainbowOn = name, false
@@ -285,6 +298,15 @@ function VField:GetThemes()
 	return out
 end
 function VField:GetFlag(f) return VField.Flags[f] end
+function VField:Notify(c) if VField.Window then VField.Window:Notify(c) end end
+function VField:LoadConfiguration() if VField.Window then return VField.Window:LoadConfiguration() end end
+function VField:GetHWID()
+	local ok, id = pcall(function() return game:GetService("RbxAnalyticsService"):GetClientId() end)
+	return ok and id or "unknown"
+end
+function VField:SetColor(key, c)
+	if COLORS[key] ~= nil and typeof(c) == "Color3" then COLORS[key] = c runHooks() end
+end
 
 ---------------------------------------------------------------------
 -- KEY SYSTEM
@@ -429,22 +451,54 @@ end
 ---------------------------------------------------------------------
 -- WINDOW
 ---------------------------------------------------------------------
+local ELEMENT_NAMES = {"CreateLabel", "CreateParagraph", "CreateDivider", "CreateButton", "CreateToggle", "CreateSlider", "CreateRangeSlider",
+	"CreateProgressBar", "CreateDropdown", "CreateInput", "CreateKeybind", "CreateColorPicker", "CreateSegmented", "CreateConsole", "CreateImage", "CreateLink"}
+
+local function normalizeWindowCfg(src)
+	local c = {}
+	for k, v in pairs(src) do c[k] = v end
+	if c.ToggleUIKeybind and not c.ToggleKey then
+		local k = c.ToggleUIKeybind
+		if typeof(k) == "string" then local ok, kk = pcall(function() return Enum.KeyCode[k] end) k = ok and kk or nil end
+		c.ToggleKey = k
+	end
+	local cs = c.ConfigurationSaving
+	if type(cs) == "table" and cs.Enabled then
+		c.ConfigFolder = c.ConfigFolder or cs.FolderName or "VField"
+		c.AutoSave = true
+		c.CfgFileName = cs.FileName
+	end
+	local ksr = src.KeySettings
+	if src.KeySystem == true and type(ksr) == "table" then
+		local kk = ksr.Key
+		local ks = {Enabled = true, Title = ksr.Title, Subtitle = ksr.Subtitle, Note = ksr.Note, FileName = ksr.FileName, SaveKey = ksr.SaveKey}
+		if ksr.GrabKeyFromSite and type(kk) == "table" and kk[1] then ks.KeyUrl = kk[1]
+		else ks.Keys = type(kk) == "table" and kk or {tostring(kk or "")} end
+		c.KeySystem = ks
+	elseif type(src.KeySystem) ~= "table" then
+		c.KeySystem = nil
+	end
+	return c
+end
+
 function VField:CreateWindow(cfg)
-	cfg = cfg or {}
+	cfg = normalizeWindowCfg(cfg or {})
 	dead, hooks = false, {}
 	if cfg.Theme == "Rainbow" then VField:SetRainbow(true)
-	elseif cfg.Theme and THEMES[cfg.Theme] then
-		currentTheme = cfg.Theme
-		for k, v in pairs(THEMES[cfg.Theme]) do COLORS[k] = v end
+	elseif cfg.Theme and THEMES[ALIAS[cfg.Theme] or cfg.Theme] then
+		currentTheme = ALIAS[cfg.Theme] or cfg.Theme
+		for k, v in pairs(THEMES[currentTheme]) do COLORS[k] = v end
 	end
 	if cfg.KeySystem and cfg.KeySystem.Enabled ~= false then
 		if not runKeySystem(cfg) then return nil end
+		if cfg.KeySystem.OnSuccess then pcall(cfg.KeySystem.OnSuccess) end
 	end
 	computeLayout(cfg)
 	local screen = newScreen("VFieldUI")
 	local win = {Tabs = {}, Conns = {}, Keybinds = {}, Binds = {}, Registry = {}, Flags = {}, Destroyed = false, NotifIndex = 0,
 		Ready = false, Open = false, ToggleKey = cfg.ToggleKey or Enum.KeyCode.RightControl, BlurOn = cfg.Blur ~= false,
-		AutoSave = cfg.AutoSave == true, Folder = cfg.ConfigFolder or "VField", CurScale = 1, NotifyOn = true, DestroyFns = {}}
+		AutoSave = cfg.AutoSave == true, Folder = (cfg.ConfigFolder or "VField") .. (cfg.PerGame and ("/" .. tostring(game.PlaceId)) or ""),
+		CfgFileName = cfg.CfgFileName, ToggleFns = {}, TabOrder = 0, CurScale = 1, NotifyOn = true, DestroyFns = {}}
 	win.Flags = VField.Flags
 	for k in pairs(VField.Flags) do VField.Flags[k] = nil end
 	local function conn(c) win.Conns[#win.Conns + 1] = c return c end
@@ -481,6 +535,12 @@ function VField:CreateWindow(cfg)
 	function win:SetTransparency(a) baseT = math.clamp(a, 0, 0.8) if self.Open then tween(main, 0.2, {BackgroundTransparency = baseT}) end end
 	function win:SetNotifications(on) self.NotifyOn = on end
 	function win:SetToggleKey(k) self.ToggleKey = k end
+	function win:OnToggle(fn) self.ToggleFns[#self.ToggleFns + 1] = fn end
+	function win:ResetPosition()
+		local cam = workspace.CurrentCamera
+		local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+		tween(main, 0.3, {Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)})
+	end
 
 	local lastPointer = Vector2.new()
 	local function remember(input)
@@ -550,9 +610,12 @@ function VField:CreateWindow(cfg)
 		lt.TextXAlignment, lt.ZIndex = Enum.TextXAlignment.Center, 4
 	end
 	local tx = COMPACT and 52 or 60
-	T(header, cfg.Name or "V Field", 16, "Text", FONT_HEAVY, UDim2.fromOffset(tx, COMPACT and 6 or 10), UDim2.new(1, -(tx + 110), 0, 22)).ZIndex = 3
+	local titleLbl = T(header, cfg.Name or "V Field", 16, "Text", FONT_HEAVY, UDim2.fromOffset(tx, COMPACT and 6 or 10), UDim2.new(1, -(tx + 110), 0, 22))
+	titleLbl.ZIndex = 3
 	local sub = T(header, cfg.Subtitle or "", 10, "Muted", FONT, UDim2.fromOffset(tx, COMPACT and 27 or 33), UDim2.new(1, -(tx + 110), 0, 16))
 	sub.ZIndex, sub.TextTruncate = 3, Enum.TextTruncate.AtEnd
+	function win:SetTitle(t) titleLbl.Text = tostring(t) end
+	function win:SetSubtitle(t) sub.Text = tostring(t) end
 	local cs = COMPACT and 34 or 28
 	local function headBtn(txt, off)
 		local b = B(header, txt, UDim2.new(1, -(cs + 10) - off, 0, (HEADER_H - cs) / 2), UDim2.fromOffset(cs, cs))
@@ -628,6 +691,7 @@ function VField:CreateWindow(cfg)
 		if show == nil then show = not win.Open end
 		if show == win.Open then return end
 		win.Open = show
+		for _, f in ipairs(win.ToggleFns) do task.spawn(f, show) end
 		token += 1
 		local my = token
 		if show then
@@ -966,6 +1030,22 @@ function VField:CreateWindow(cfg)
 		end
 		extra.Destroy = function() row:Destroy() info.rec.hidden = true info.rec.match = false end
 		if config and config.Disabled then extra.SetDisabled(true) end
+		if not extra.Set then
+			extra.Set = function(t)
+				if type(t) == "table" then
+					if t.Title or t.Name then lab.SetTitle(t.Title or t.Name) end
+					if t.Content or t.Description then lab.SetDescription(t.Content or t.Description) end
+				else lab.SetTitle(t) end
+			end
+		end
+		for k, f in pairs(extra) do
+			if type(f) == "function" then
+				extra[k] = function(a, ...)
+					if a == extra then return f(...) end
+					return f(a, ...)
+				end
+			end
+		end
 		return extra
 	end
 
@@ -1195,7 +1275,11 @@ function VField:CreateWindow(cfg)
 				tween(panel, 0.2, {Size = UDim2.new(1, -16, 0, openH())})
 				info.Resize(openH() + 8, true)
 			end
-			local function fire() emit(config, getValue()) end
+			local function fire()
+				local v = getValue()
+				if config.CompatTable and not multi then v = v and {v} or {} end
+				emit(config, v)
+			end
 			local function choose(o)
 				if multi then
 					selected[o] = not selected[o] or nil
@@ -1422,6 +1506,176 @@ function VField:CreateWindow(cfg)
 			register(config, "color", function() return color end, function(c) if typeof(c) == "Color3" then setColor(c, false) end end)
 			return common(row, lab, info, {Set = setColor, Get = function() return color end}, config)
 		end
+
+		function section:CreateSegmented(config)
+			local row, lab, info = makeRow(self, config, 0, 70, 38)
+			local options = {}
+			for _, o in ipairs(config.Options or {}) do options[#options + 1] = tostring(o) end
+			local current = tostring(config.CurrentOption or options[1] or "")
+			local holder = make("Frame", {BackgroundTransparency = 1, Position = UDim2.new(0, 13, 1, -34), Size = UDim2.new(1, -26, 0, 26), ZIndex = 5}, row)
+			make("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, holder)
+			local btns, n = {}, math.max(#options, 1)
+			local function paint()
+				for o, b in pairs(btns) do
+					local on = o == current
+					b.BackgroundColor3 = on and COLORS.Soft or COLORS.Panel
+					b.TextColor3 = on and COLORS.Bright or COLORS.Muted
+				end
+			end
+			local function set(o, silent)
+				o = tostring(o)
+				if not btns[o] then return end
+				current = o
+				paint()
+				if not silent then playSound("Click", 0.8) emit(config, current) end
+			end
+			for i, o in ipairs(options) do
+				local b = B(holder, o, nil, UDim2.new(1 / n, -4 * (n - 1) / n, 1, 0), "Panel")
+				b.LayoutOrder, b.ZIndex, b.TextSize = i, 6, 10 + BOOST
+				stroke(b, COLORS.Line, 0.3, 1)
+				b.MouseButton1Click:Connect(function() ripple(b) set(o, false) end)
+				btns[o] = b
+			end
+			hook(paint)
+			register(config, "segmented", function() return current end, function(v) set(v, false) end)
+			return common(row, lab, info, {Set = set, Get = function() return current end}, config)
+		end
+
+		function section:CreateRangeSlider(config)
+			local row, lab, info = makeRow(self, config, COMPACT and 130 or 150, COMPACT and 80 or 70, COMPACT and 38 or 26)
+			local minV, maxV = config.Range[1], config.Range[2]
+			local inc = (config.Increment and config.Increment > 0) and config.Increment or 1
+			local cv = config.CurrentValue or {}
+			local lo, hi = cv[1] or minV, cv[2] or maxV
+			local vl = T(row, "", 10 + BOOST, "Bright", FONT_BOLD, UDim2.new(1, -153, 0, 7), UDim2.fromOffset(140, 20))
+			vl.ZIndex, vl.TextXAlignment = 5, Enum.TextXAlignment.Right
+			local track = P(make("Frame", {BorderSizePixel = 0, Position = UDim2.new(0, 13, 1, COMPACT and -26 or -21), Size = UDim2.new(1, -26, 0, COMPACT and 8 or 6), ZIndex = 5}, row), {BackgroundColor3 = "Panel"})
+			stroke(track, COLORS.Line, 0.5, 1)
+			local fill = P(make("Frame", {BorderSizePixel = 0, ZIndex = 6}, track), {BackgroundColor3 = "Accent"})
+			local ks = COMPACT and 20 or 12
+			local function knob()
+				local k = P(make("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, Size = UDim2.fromOffset(ks, ks), ZIndex = 7}, track), {BackgroundColor3 = "Text"})
+				local st = stroke(k, COLORS.Accent, 0, 2)
+				hook(function() st.Color = COLORS.Accent end)
+				return k
+			end
+			local k1, k2 = knob(), knob()
+			local hit = make("TextButton", {AutoButtonColor = false, BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5),
+				Size = UDim2.new(1, 0, 0, COMPACT and 40 or 24), Text = "", ZIndex = 8}, track)
+			local function snap(n)
+				local sn = minV + math.floor(((n - minV) / inc) + 0.5) * inc
+				return tonumber(string.format("%.10g", math.clamp(sn, minV, maxV)))
+			end
+			local function visual()
+				local r1, r2 = (lo - minV) / (maxV - minV), (hi - minV) / (maxV - minV)
+				fill.Position, fill.Size = UDim2.new(r1, 0, 0, 0), UDim2.new(r2 - r1, 0, 1, 0)
+				k1.Position, k2.Position = UDim2.new(r1, 0, 0.5, 0), UDim2.new(r2, 0, 0.5, 0)
+				vl.Text = tostring(lo) .. " - " .. tostring(hi) .. (config.Suffix or "")
+			end
+			local function set(l, h2, silent)
+				l, h2 = snap(l), snap(h2)
+				if l > h2 then l, h2 = h2, l end
+				lo, hi = l, h2
+				visual()
+				if not silent then emit(config, {lo, hi}) end
+			end
+			local active
+			hit.InputBegan:Connect(function(i)
+				if not isPress(i) then return end
+				active = nil
+				local function drag(p)
+					local w = track.AbsoluteSize.X
+					if w <= 0 then return end
+					local v = snap(minV + math.clamp((p.X - track.AbsolutePosition.X) / w, 0, 1) * (maxV - minV))
+					if not active then active = math.abs(v - lo) <= math.abs(v - hi) and 1 or 2 end
+					local pl, ph = lo, hi
+					if active == 1 then lo = math.min(v, hi) else hi = math.max(v, lo) end
+					if lo ~= pl or hi ~= ph then visual() emit(config, {lo, hi}) end
+				end
+				win.ActiveDrag = {Drag = drag}
+				drag(pointer(i))
+			end)
+			visual()
+			register(config, "range", function() return {lo, hi} end, function(v) if type(v) == "table" and v[1] and v[2] then set(v[1], v[2], false) end end)
+			return common(row, lab, info, {Set = function(t, silent) if type(t) == "table" then set(t[1], t[2], silent) end end, Get = function() return {lo, hi} end}, config)
+		end
+
+		function section:CreateConsole(config)
+			local H = config.Height or 130
+			local maxLines = config.MaxLines or 200
+			local row, lab, info = makeRow(self, config, 0, 40)
+			local box = P(make("ScrollingFrame", {BorderSizePixel = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+				Size = UDim2.new(1, -26, 0, H), ZIndex = 5}, row), {BackgroundColor3 = "Panel"})
+			stroke(box, COLORS.Line, 0.4, 1)
+			make("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1)}, box)
+			make("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4)}, box)
+			info.onLayout = function() box.Position = UDim2.fromOffset(13, info.h - 2) end
+			info.Resize(H + 10, false)
+			box.Position = UDim2.fromOffset(13, info.h - 2)
+			local n = 0
+			local KC = {info = COLORS.Text, success = STATUS.success, warn = STATUS.warn, error = STATUS.error}
+			local obj = {}
+			function obj.Log(text, kind)
+				n += 1
+				local stamp = config.Timestamps == false and "" or os.date("[%H:%M:%S] ")
+				local l = make("TextLabel", {BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 10 + BOOST, TextWrapped = true, RichText = false, LayoutOrder = n,
+					TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = KC[kind or "info"] or COLORS.Text, Text = stamp .. tostring(text),
+					Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 6}, box)
+				local kids = {}
+				for _, c in ipairs(box:GetChildren()) do if c:IsA("TextLabel") then kids[#kids + 1] = c end end
+				if #kids > maxLines then table.sort(kids, function(a, b) return a.LayoutOrder < b.LayoutOrder end) kids[1]:Destroy() end
+				task.defer(function() box.CanvasPosition = Vector2.new(0, 1e6) end)
+			end
+			function obj.Clear() for _, c in ipairs(box:GetChildren()) do if c:IsA("TextLabel") then c:Destroy() end end end
+			return common(row, lab, info, obj, config)
+		end
+
+		function section:CreateImage(config)
+			local H = config.Height or 120
+			local row, lab, info = makeRow(self, config, 0, 40)
+			local function asset(a)
+				a = tostring(a or "")
+				return a:match("^%d+$") and ("rbxassetid://" .. a) or a
+			end
+			local img = make("ImageLabel", {BackgroundTransparency = 1, BorderSizePixel = 0, Image = asset(config.Image), ScaleType = config.ScaleType or Enum.ScaleType.Fit,
+				Size = UDim2.new(1, -26, 0, H), ZIndex = 5}, row)
+			info.onLayout = function() img.Position = UDim2.fromOffset(13, info.h - 2) end
+			info.Resize(H + 10, false)
+			img.Position = UDim2.fromOffset(13, info.h - 2)
+			return common(row, lab, info, {Set = function(a) img.Image = asset(a) end, Get = function() return img.Image end}, config)
+		end
+
+		function section:CreateLink(config)
+			local c = {}
+			for k, v in pairs(config) do c[k] = v end
+			c.ButtonText = c.ButtonText or "COPY"
+			local cb = config.Callback
+			c.Callback = function()
+				local ok = pcall(function() setclipboard(config.Link or "") end)
+				win:Notify({Title = config.Name or "Link", Content = ok and "Copied to clipboard." or tostring(config.Link or ""), Kind = ok and "success" or "info"})
+				if cb then cb() end
+			end
+			return self:CreateButton(c)
+		end
+
+		local function normCfg(n, c)
+			if type(c) == "string" then c = {Name = c, Title = c}
+			elseif type(c) == "table" then local t = {} for k, v in pairs(c) do t[k] = v end c = t
+			else c = {} end
+			if n == "CreateColorPicker" and c.Color and not c.CurrentValue then c.CurrentValue = c.Color end
+			if n == "CreateDropdown" then
+				if c.MultipleOptions and c.Multi == nil then c.Multi = true end
+				if type(c.CurrentOption) == "table" and not c.Multi then c.CompatTable = true c.CurrentOption = c.CurrentOption[1] end
+			end
+			if n == "CreateKeybind" and c.HoldToInteract and not c.Mode then c.Mode = "Hold" end
+			if n == "CreateInput" and c.RemoveTextAfterFocusLost then c.ClearAfter = true end
+			if (n == "CreateSlider" or n == "CreateRangeSlider") and c.Range == nil then c.Range = {c.Min or 0, c.Max or 100} end
+			return c
+		end
+		for _, n in ipairs(ELEMENT_NAMES) do
+			local orig = section[n]
+			if orig then section[n] = function(self2, c) return orig(self2, normCfg(n, c)) end end
+		end
 	end
 
 	---------------------------------------------------------------
@@ -1463,10 +1717,12 @@ function VField:CreateWindow(cfg)
 	function win:CreateTab(name, icon)
 		local tab = {Name = name, Sections = {}}
 		local btn = B(tabList, "", nil, UDim2.new(1, 0, 0, COMPACT and 58 or 38))
-		btn.BackgroundTransparency, btn.ZIndex, btn.LayoutOrder = 1, 4, #self.Tabs + 1
+		self.TabOrder += 1
+		btn.BackgroundTransparency, btn.ZIndex, btn.LayoutOrder = 1, 4, self.TabOrder
 		hover(btn)
 		local bar = P(make("Frame", {BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.fromOffset(3, 0), ZIndex = 6}, btn), {BackgroundColor3 = "Bright"})
 		local iconText = tostring(icon or "◈")
+		if not iconText:match("^rbxassetid://") and not iconText:match("^%d+$") and (utf8.len(iconText) or #iconText) > 2 then iconText = "◈" end
 		local img = iconText:match("^rbxassetid://") and iconText or (iconText:match("^%d+$") and ("rbxassetid://" .. iconText) or nil)
 		local il
 		if img then
@@ -1517,6 +1773,13 @@ function VField:CreateWindow(cfg)
 		end)
 		table.insert(self.Tabs, tab)
 		if #self.Tabs == 1 then activate() end
+		for _, n in ipairs(ELEMENT_NAMES) do
+			tab[n] = function(a, ...)
+				local sec = tab.Current or tab:CreateSection(name)
+				if a == tab then return sec[n](sec, ...) end
+				return sec[n](sec, a, ...)
+			end
+		end
 
 		function tab:CreateSection(title)
 			local section = {Tab = tab, Window = win, Rows = {}, Collapsed = false, NameLower = strip(title):lower()}
@@ -1541,6 +1804,7 @@ function VField:CreateWindow(cfg)
 			heading.MouseLeave:Connect(function() tween(heading, 0.15, {TextColor3 = COLORS.Bright}) end)
 			sectionMethods(section)
 			table.insert(tab.Sections, section)
+			tab.Current = section
 			return section
 		end
 		return tab
@@ -1602,27 +1866,52 @@ function VField:CreateWindow(cfg)
 		tween(veil, 0.2, {BackgroundTransparency = 0.45})
 		local cw = math.min(340, vp.X - 30)
 		local ch = measure(c.Content or "", 11, FONT, cw - 40)
-		local card = P(make("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BorderSizePixel = 0, Size = UDim2.fromOffset(cw, 108 + ch), ZIndex = 301}, veil), {BackgroundColor3 = "Background"})
+		local card = P(make("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BorderSizePixel = 0, Size = UDim2.fromOffset(cw, 108 + ch + (c.Input and 44 or 0)), ZIndex = 301}, veil), {BackgroundColor3 = "Background"})
 		local cst = stroke(card, COLORS.Accent, 0.3, 1)
 		make("Frame", {BackgroundColor3 = COLORS.Accent, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 3), ZIndex = 302}, card)
 		T(card, c.Title or "Confirm", 15, "Text", FONT_HEAVY, UDim2.fromOffset(20, 16), UDim2.new(1, -40, 0, 22)).ZIndex = 302
 		local body2 = T(card, c.Content or "", 11, "Muted", FONT, UDim2.fromOffset(20, 44), UDim2.new(1, -40, 0, ch))
 		body2.TextWrapped, body2.TextYAlignment, body2.ZIndex = true, Enum.TextYAlignment.Top, 302
+		local inputBox
+		if c.Input then
+			inputBox = P(make("TextBox", {BorderSizePixel = 0, ClearTextOnFocus = false, Font = FONT, TextSize = 12, Text = tostring(c.Default or ""), PlaceholderText = c.Placeholder or "Type here...",
+				TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(20, 50 + ch), Size = UDim2.new(1, -40, 0, 32), ZIndex = 302}, card),
+				{BackgroundColor3 = "Raised", TextColor3 = "Text", PlaceholderColor3 = "Muted"})
+			make("UIPadding", {PaddingLeft = UDim.new(0, 8)}, inputBox)
+			stroke(inputBox, COLORS.Line, 0.2, 1)
+		end
 		local btns = c.Buttons or {{Name = "OK", Primary = true}}
 		local n = #btns
 		local bw = (cw - 40 - (n - 1) * 8) / n
 		local function close() tween(veil, 0.15, {BackgroundTransparency = 1}) task.delay(0.15, function() veil:Destroy() end) end
 		for i, bd in ipairs(btns) do
-			local b = B(card, bd.Name or "OK", UDim2.fromOffset(20 + (i - 1) * (bw + 8), 56 + ch), UDim2.fromOffset(bw, 34), bd.Primary and "Accent" or "Raised")
+			local b = B(card, bd.Name or "OK", UDim2.fromOffset(20 + (i - 1) * (bw + 8), 56 + ch + (c.Input and 44 or 0)), UDim2.fromOffset(bw, 34), bd.Primary and "Accent" or "Raised")
 			b.ZIndex = 302
 			if bd.Primary then P(b, {TextColor3 = "Background"}) end
-			b.MouseButton1Click:Connect(function() playSound("Click") close() if bd.Callback then task.spawn(bd.Callback) end end)
+			b.MouseButton1Click:Connect(function() playSound("Click") close() if bd.Callback then task.spawn(bd.Callback, inputBox and inputBox.Text or nil) end end)
 		end
 	end
 
 	---------------------------------------------------------------
 	-- configs
 	---------------------------------------------------------------
+	function win:Prompt(c)
+		c = c or {}
+		return self:Dialog({Title = c.Title or "Input", Content = c.Content or "", Input = true, Placeholder = c.Placeholder, Default = c.Default,
+			Buttons = {{Name = "Cancel"}, {Name = c.ButtonText or "OK", Primary = true, Callback = c.Callback}}})
+	end
+	function win:CreateTabGroup(title)
+		self.TabOrder += 1
+		local l = T(tabList, COMPACT and "" or string.upper(title or ""), 9, "Muted", FONT_HEAVY, nil, UDim2.new(1, 0, 0, COMPACT and 6 or 22))
+		l.LayoutOrder = self.TabOrder
+		if not COMPACT then make("UIPadding", {PaddingLeft = UDim.new(0, 4), PaddingTop = UDim.new(0, 6)}, l) end
+		return l
+	end
+	function win:GetTab(n) for _, t in ipairs(self.Tabs) do if t.Name == n then return t end end end
+	function win:SelectTab(n) local t = self:GetTab(n) if t then t.Select() end return t end
+	function win:ModifyTheme(n) VField:SetTheme(n) end
+	function win:LoadConfiguration() return self:LoadConfig(self.CfgFileName or "autosave") end
+
 	local function encode(kind, v)
 		if kind == "color" then return {__c = {math.floor(v.R * 255 + 0.5), math.floor(v.G * 255 + 0.5), math.floor(v.B * 255 + 0.5)}} end
 		if kind == "keybind" then return {__k = v and v.Name or false} end
@@ -1689,13 +1978,13 @@ function VField:CreateWindow(cfg)
 		if name and name ~= "" then
 			local ok = self:LoadConfig(name)
 			if ok and not quiet then self:Notify({Title = "Config", Content = "Auto-loaded '" .. name .. "'.", Kind = "success"}) end
-		elseif self.AutoSave then self:LoadConfig("autosave") end
+		elseif self.AutoSave then self:LoadConfig(self.CfgFileName or "autosave") end
 	end
 	local saveQueued = false
 	function win:QueueSave()
 		if saveQueued or not canFS then return end
 		saveQueued = true
-		task.delay(1.2, function() saveQueued = false if not win.Destroyed then win:SaveConfig("autosave") end end)
+		task.delay(1.2, function() saveQueued = false if not win.Destroyed then win:SaveConfig(win.CfgFileName or "autosave") end end)
 	end
 
 	---------------------------------------------------------------
@@ -1714,6 +2003,13 @@ function VField:CreateWindow(cfg)
 		ui:CreateSlider({Name = "Window Transparency", Description = "See-through window background", Range = {0, 0.7}, Increment = 0.05, CurrentValue = 0, Flag = "vf_alpha", Callback = function(v) win:SetTransparency(v) end})
 		ui:CreateToggle({Name = "Background Blur", Description = "Blurs the game behind the window", CurrentValue = win.BlurOn, Flag = "vf_blur", Callback = function(v) win:SetBlur(v) end})
 		ui:CreateToggle({Name = "Notifications", Description = "Shows pop-up notifications", CurrentValue = true, Flag = "vf_notify", Callback = function(v) win:SetNotifications(v) end})
+		ui:CreateButton({Name = "Reset Window Position", Description = "Centers the window again", ButtonText = "RESET", Callback = function() win:ResetPosition() end})
+		local ed = tab:CreateSection("THEME EDITOR")
+		ed:SetCollapsed(true)
+		for _, k in ipairs({"Background", "Panel", "Raised", "Text", "Muted", "Line"}) do
+			ed:CreateColorPicker({Name = k, CurrentValue = COLORS[k], Flag = "vf_col_" .. k, Callback = function(c) VField:SetColor(k, c) end})
+		end
+		ed:CreateButton({Name = "Reset Theme Colors", ButtonText = "RESET", Callback = function() VField:SetTheme(currentTheme) end})
 		local snds = tab:CreateSection("SOUNDS")
 		snds:CreateToggle({Name = "UI Sounds", Description = "Click, toggle, tab and notification sounds", CurrentValue = true, Flag = "vf_sounds", Callback = function(v) win:SetSounds(v) end})
 		snds:CreateSlider({Name = "UI Volume", Range = {0, 2}, Increment = 0.1, CurrentValue = 1, Suffix = "x", Flag = "vf_volume", Callback = function(v) win:SetVolume(v) end})
@@ -1756,6 +2052,27 @@ function VField:CreateWindow(cfg)
 				local ok = win:ImportConfig(t)
 				win:Notify({Title = "Config", Content = ok and "Imported." or "Invalid config text.", Kind = ok and "success" or "error"})
 			end})
+		if o.Utilities ~= false then
+			local ut = tab:CreateSection("UTILITIES")
+			local afk = true
+			conn(lp.Idled:Connect(function()
+				if not afk then return end
+				pcall(function()
+					local vu = game:GetService("VirtualUser")
+					vu:CaptureController()
+					vu:ClickButton2(Vector2.new())
+				end)
+			end))
+			ut:CreateToggle({Name = "Anti-AFK", Description = "Stops Roblox from kicking you for idling", CurrentValue = true, Flag = "vf_antiafk", Callback = function(v) afk = v end})
+			ut:CreateButton({Name = "Rejoin Server", ButtonText = "REJOIN", Confirm = true, Callback = function()
+				pcall(function()
+					local TS = game:GetService("TeleportService")
+					if #Players:GetPlayers() <= 1 then TS:Teleport(game.PlaceId, lp) else TS:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp) end
+				end)
+			end})
+			ut:CreateButton({Name = "Copy Job ID", ButtonText = "COPY", Callback = function() pcall(function() setclipboard(game.JobId) end) win:Notify({Title = "Copied", Content = "Job ID copied.", Kind = "success"}) end})
+			ut:CreateButton({Name = "Copy Place ID", ButtonText = "COPY", Callback = function() pcall(function() setclipboard(tostring(game.PlaceId)) end) win:Notify({Title = "Copied", Content = "Place ID copied.", Kind = "success"}) end})
+		end
 		local about = tab:CreateSection("ABOUT")
 		about:CreateLabel({Title = (cfg.Name or "V Field") .. " • V Field Library v" .. VField.Version,
 			Content = "Right-click (PC) a bindable switch to set its key. Search finds any option. Tap a section title to collapse it. Drag the window edge corner to resize."})
@@ -1876,5 +2193,7 @@ function VField:Unload()
 	end
 	env.VFieldLib = nil
 end
+
+VField.Destroy = VField.Unload
 
 return VField
