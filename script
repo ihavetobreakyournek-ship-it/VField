@@ -1,9 +1,9 @@
 --[[
-	V FIELD LIBRARY  v6.0  "Zenith"
+	V FIELD LIBRARY  v6.0  "Vancard"
 	A standalone, all-square Roblox UI library. PC + mobile.
 
 	QUICK START
-		local VField = loadstring(game:HttpGet("YOUR_RAW_URL"))()
+		local VField = loadstring(game:HttpGet("https://raw.githubusercontent.com/ihavetobreakyournek-ship-it/VField/refs/heads/main/script"))()
 		local Window = VField:CreateWindow({
 			Name = "My Hub", Subtitle = "v1.0", ToggleKey = Enum.KeyCode.RightControl,
 			Theme = "Crimson", ConfigFolder = "MyHub", AutoSave = true,
